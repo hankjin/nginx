@@ -44,7 +44,7 @@ typedef struct {
 
     ngx_array_t                    *passwords;
 
-    ngx_shm_zone_t                 *shm_zone;
+    ngx_ssl_session_cache_cfg_t     ext_session_cache;
 
     ngx_flag_t                      session_tickets;
     ngx_array_t                    *session_ticket_keys;

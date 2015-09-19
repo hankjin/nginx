@@ -64,6 +64,16 @@ typedef struct {
     unsigned                    handshake_buffer_set:1;
 } ngx_ssl_connection_t;
 
+typedef struct {
+    ngx_shm_zone_t *shm_zone;
+    ngx_str_t memcache_name;
+    ngx_str_t memcache_host;
+    ngx_int_t memcache_port;
+    ngx_int_t memcache_poll_timeout;
+    ngx_int_t memcache_max_blocked_worker_num;
+    ngx_shm_zone_t *memcache_blocked_worker_num;
+} ngx_ssl_session_cache_cfg_t;
+
 
 #define NGX_SSL_NO_SCACHE            -2
 #define NGX_SSL_NONE_SCACHE          -3
@@ -139,10 +149,11 @@ ngx_array_t *ngx_ssl_read_password_file(ngx_conf_t *cf, ngx_str_t *file);
 ngx_int_t ngx_ssl_dhparam(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *file);
 ngx_int_t ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *name);
 ngx_int_t ngx_ssl_session_cache(ngx_ssl_t *ssl, ngx_str_t *sess_ctx,
-    ssize_t builtin_session_cache, ngx_shm_zone_t *shm_zone, time_t timeout);
+    ssize_t builtin_session_cache, ngx_ssl_session_cache_cfg_t *sc_cfg, time_t timeout);
 ngx_int_t ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *paths);
-ngx_int_t ngx_ssl_session_cache_init(ngx_shm_zone_t *shm_zone, void *data);
+ngx_int_t ngx_ssl_shm_session_cache_init(ngx_shm_zone_t *shm_zone, void *data);
+ngx_int_t ngx_ssl_session_atomic_init(ngx_shm_zone_t *shm_zone, void *data);
 ngx_int_t ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c,
     ngx_uint_t flags);
 

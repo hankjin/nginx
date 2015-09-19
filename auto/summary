@@ -28,6 +28,12 @@ case $OPENSSL in
     *)     echo "  + using OpenSSL library: $OPENSSL" ;;
 esac
 
+case $LIBMEMCACHED in
+    YES)   echo "  + using system libmemcached" ;;
+    NONE)  echo "  + libmemcached is not used" ;;
+    *)     echo "  + using libmemcached: $LIBMEMCACHED" ;;
+esac
+
 case $MD5 in
     YES)   echo "  + md5: using $MD5_LIB library" ;;
     NONE)  echo "  + md5 library is not used" ;;

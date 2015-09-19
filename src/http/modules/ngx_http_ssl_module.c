@@ -515,7 +515,12 @@ ngx_http_ssl_create_srv_conf(ngx_conf_t *cf)
      *     sscf->trusted_certificate = { 0, NULL };
      *     sscf->crl = { 0, NULL };
      *     sscf->ciphers = { 0, NULL };
-     *     sscf->shm_zone = NULL;
+     *     sscf->ext_session_cache.shm_zone = NULL;
+     *     sscf->ext_session_cache.memcache_name = {0, NULL};
+     *     sscf->ext_session_cache.memcache_host = {0, NULL};
+     *     sscf->ext_session_cache.memcache_port = 0;
+     *     sscf->ext_session_cache.memcache_poll_timeout = 0;
+     *     sscf->ext_session_cache.memcache_max_blocked_worker_num = 0;
      *     sscf->stapling_file = { 0, NULL };
      *     sscf->stapling_responder = { 0, NULL };
      */
@@ -733,13 +738,30 @@ ngx_http_ssl_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_value(conf->builtin_session_cache,
                          prev->builtin_session_cache, NGX_SSL_NONE_SCACHE);
 
-    if (conf->shm_zone == NULL) {
-        conf->shm_zone = prev->shm_zone;
+    if (conf->ext_session_cache.shm_zone == NULL) {
+        conf->ext_session_cache.shm_zone = prev->ext_session_cache.shm_zone;
     }
+
+#ifdef MEMCACHE_SSL_SESSION_STORE
+    if (conf->ext_session_cache.memcache_name.len == 0) {
+        /* None of these can have been set without memcache_name being set to
+         * something, and if memcache_name has been set to something, then
+         * all of these will have been set to the correct values
+         */
+        conf->ext_session_cache.memcache_name = prev->ext_session_cache.memcache_name;
+        conf->ext_session_cache.memcache_host = prev->ext_session_cache.memcache_host;
+        conf->ext_session_cache.memcache_port = prev->ext_session_cache.memcache_port;
+        conf->ext_session_cache.memcache_poll_timeout = prev->ext_session_cache.memcache_poll_timeout;
+        conf->ext_session_cache.memcache_max_blocked_worker_num = prev->ext_session_cache.memcache_max_blocked_worker_num;
+    }
+    if (conf->ext_session_cache.memcache_blocked_worker_num == NULL) {
+	conf->ext_session_cache.memcache_blocked_worker_num = prev->ext_session_cache.memcache_blocked_worker_num;
+    }
+#endif
 
     if (ngx_ssl_session_cache(&conf->ssl, &ngx_http_ssl_sess_id_ctx,
                               conf->builtin_session_cache,
-                              conf->shm_zone, conf->session_timeout)
+                              &conf->ext_session_cache, conf->session_timeout)
         != NGX_OK)
     {
         return NGX_CONF_ERROR;
@@ -820,13 +842,29 @@ ngx_http_ssl_password_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+static size_t
+ngx_conf_get_one_token(ngx_str_t *value, size_t *total_len) {
+    size_t len = 0;
+    ngx_uint_t j;
+    for (j = *total_len; j < value->len; j++) {
+        (*total_len)++;
+        if (value->data[j] == ':') {
+            value->data[j] = '\0';
+            break;
+        }
+
+        len++;
+    }
+    return len;
+}
+
 static char *
 ngx_http_ssl_session_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_ssl_srv_conf_t *sscf = conf;
 
     size_t       len;
-    ngx_str_t   *value, name, size;
+    ngx_str_t   *value, shm_name, shm_size;
     ngx_int_t    n;
     ngx_uint_t   i, j;
 
@@ -883,13 +921,13 @@ ngx_http_ssl_session_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                 goto invalid;
             }
 
-            name.len = len;
-            name.data = value[i].data + sizeof("shared:") - 1;
+            shm_name.len = len;
+            shm_name.data = value[i].data + sizeof("shared:") - 1;
 
-            size.len = value[i].len - j - 1;
-            size.data = name.data + len + 1;
+            shm_size.len = value[i].len - j - 1;
+            shm_size.data = shm_name.data + len + 1;
 
-            n = ngx_parse_size(&size);
+            n = ngx_parse_size(&shm_size);
 
             if (n == NGX_ERROR) {
                 goto invalid;
@@ -903,21 +941,100 @@ ngx_http_ssl_session_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                 return NGX_CONF_ERROR;
             }
 
-            sscf->shm_zone = ngx_shared_memory_add(cf, &name, n,
+            sscf->ext_session_cache.shm_zone = ngx_shared_memory_add(cf, &shm_name, n,
                                                    &ngx_http_ssl_module);
-            if (sscf->shm_zone == NULL) {
+            if (sscf->ext_session_cache.shm_zone == NULL) {
                 return NGX_CONF_ERROR;
             }
 
-            sscf->shm_zone->init = ngx_ssl_session_cache_init;
+            sscf->ext_session_cache.shm_zone->init = ngx_ssl_shm_session_cache_init;
 
             continue;
         }
+#ifdef MEMCACHE_SSL_SESSION_STORE
+        if (value[i].len > sizeof("memcached:") - 1
+            && ngx_strncmp(value[i].data, "memcached:", sizeof("memcached:") - 1)
+               == 0)
+        {
+            /* total_len is the current offset into the value[i] string as a
+             * whole; len is the length of the current element */
+            size_t total_len = sizeof("memcached:") - 1;
 
+            len = ngx_conf_get_one_token(&value[i], &total_len);
+            if (len == 0) {
+                goto invalid;
+            }
+
+            sscf->ext_session_cache.memcache_name.len = len;
+            sscf->ext_session_cache.memcache_name.data = value[i].data + sizeof("memcached:") - 1;
+
+            ngx_log_error_core(NGX_LOG_DEBUG, cf->log, 0,
+                    "memcache_name parsed as %V",
+                    &sscf->ext_session_cache.memcache_name);
+
+            if (value[i].len > total_len) {
+                /* We have a host */
+                len = ngx_conf_get_one_token(&value[i], &total_len);
+
+                sscf->ext_session_cache.memcache_host.len = len;
+                sscf->ext_session_cache.memcache_host.data = value[i].data + total_len - len - 1;
+
+                ngx_log_error_core(NGX_LOG_DEBUG, cf->log, 0,
+                               "memcache_host parsed as %V (%d)",
+                               &sscf->ext_session_cache.memcache_host, len);
+            }
+
+            if (value[i].len > total_len) {
+                /* Wow, we even have a port */
+                len = ngx_conf_get_one_token(&value[i], &total_len);
+                sscf->ext_session_cache.memcache_port = ngx_atoi(value[i].data + total_len - len - 1, len);
+
+                ngx_log_error_core(NGX_LOG_DEBUG, cf->log, 0,
+                               "memcache_port parsed as %i",
+                               sscf->ext_session_cache.memcache_port);
+            }
+
+            if (value[i].len > total_len) {
+                /* We have a poll_timeout */
+                /* Wow, we even have a port */
+                len = ngx_conf_get_one_token(&value[i], &total_len);
+                sscf->ext_session_cache.memcache_poll_timeout = ngx_atoi(value[i].data + total_len - len - 1, len);
+
+                ngx_log_error_core(NGX_LOG_DEBUG, cf->log, 0,
+                               "memcache_poll_timeout parsed as %i",
+                               sscf->ext_session_cache.memcache_poll_timeout);
+            } else {
+                sscf->ext_session_cache.memcache_poll_timeout = 0;
+            }
+
+            if (value[i].len > total_len) {
+                /* We have a memcache_max_blocked_worker_num */
+                sscf->ext_session_cache.memcache_max_blocked_worker_num = ngx_atoi(value[i].data + total_len, value[i].len - total_len);
+
+                ngx_log_error_core(NGX_LOG_DEBUG, cf->log, 0,
+                               "memcache_max_blocked_worker_num parsed as %i",
+                               sscf->ext_session_cache.memcache_max_blocked_worker_num);
+            } else {
+                sscf->ext_session_cache.memcache_max_blocked_worker_num = 0;
+            }
+            sscf->ext_session_cache.memcache_blocked_worker_num = ngx_shared_memory_add(
+                    cf,
+                    &sscf->ext_session_cache.memcache_host,
+                    8 * ngx_pagesize,
+                    &ngx_http_ssl_module);
+            if (sscf->ext_session_cache.memcache_blocked_worker_num == NULL) {
+                return NGX_CONF_ERROR;
+            }
+            sscf->ext_session_cache.memcache_blocked_worker_num->init = ngx_ssl_session_atomic_init;
+            continue;
+        }
+
+#endif
         goto invalid;
     }
-
-    if (sscf->shm_zone && sscf->builtin_session_cache == NGX_CONF_UNSET) {
+    if ((sscf->ext_session_cache.shm_zone
+		    ||sscf->ext_session_cache.memcache_name.len > 0)
+	    && sscf->builtin_session_cache == NGX_CONF_UNSET) {
         sscf->builtin_session_cache = NGX_SSL_NO_BUILTIN_SCACHE;
     }
 
