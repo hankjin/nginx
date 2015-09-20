@@ -4455,6 +4455,9 @@ ngx_http_upstream_process_connection(ngx_http_request_t *r, ngx_table_elt_t *h,
         != NULL)
     {
         r->upstream->headers_in.connection_close = 1;
+        if (r->upstream->conf->pass_connection_close) {
+            r->keepalive = 0;
+        }
     }
 
     return NGX_OK;

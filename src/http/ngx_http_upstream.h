@@ -166,6 +166,7 @@ typedef struct {
     ngx_flag_t                       request_buffering;
     ngx_flag_t                       pass_request_headers;
     ngx_flag_t                       pass_request_body;
+    ngx_flag_t                       pass_connection_close;
 
     ngx_flag_t                       ignore_client_abort;
     ngx_flag_t                       intercept_errors;

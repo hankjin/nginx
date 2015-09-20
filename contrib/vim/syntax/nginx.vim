@@ -306,6 +306,7 @@ syn keyword ngxDirective proxy_no_cache
 syn keyword ngxDirective proxy_pass_error_message
 syn keyword ngxDirective proxy_pass_header
 syn keyword ngxDirective proxy_pass_request_body
+syn keyword ngxDirective proxy_pass_connection_close
 syn keyword ngxDirective proxy_pass_request_headers
 syn keyword ngxDirective proxy_read_timeout
 syn keyword ngxDirective proxy_redirect
